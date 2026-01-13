@@ -14,9 +14,14 @@ jobs:
     - uses: cachix/install-nix-action@v31
       with:
         extra_nix_config: |
+          system-features = nixos-test benchmark big-parallel kvm
           extra-substituters = https://cache.thalheim.io
           extra-trusted-public-keys = cache.thalheim.io-1:R7msbosLEZKrxk/lKxf9BTjOOH7Ax3H0Qj0/6wiHOgc=
     - name: Add keys group (needed for go tests)
       run: sudo groupadd keys
     - name: Run unit tests
       run: nix run .#unit-tests
+    - name: Run PQ integration tests
+      run: |
+        nix build -L .#checks.x86_64-linux.age-pq-key-generation
+        nix build -L .#checks.x86_64-linux.age-pq-key-generation-auto

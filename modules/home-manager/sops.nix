@@ -116,6 +116,7 @@ let
   manifest = manifestFor "" cfg.secrets cfg.templates;
 
   escapedAgeKeyFile = lib.escapeShellArg cfg.age.keyFile;
+  pqFlag = lib.optionalString (cfg.age.generateKeyType == "hybrid-pq") " -pq";
 
   script = toString (
     pkgs.writeShellScript "sops-nix-user" (
@@ -124,7 +125,7 @@ let
           echo generating machine-specific age key...
           ${pkgs.coreutils}/bin/mkdir -p $(${pkgs.coreutils}/bin/dirname ${escapedAgeKeyFile})
           # age-keygen sets 0600 by default, no need to chmod.
-          ${pkgs.age}/bin/age-keygen -o ${escapedAgeKeyFile}
+          ${pkgs.age}/bin/age-keygen${pqFlag} -o ${escapedAgeKeyFile}
         fi
       ''
       + ''
@@ -267,6 +268,17 @@ in
         '';
       };
 
+      generateKeyType = lib.mkOption {
+        type = lib.types.enum [ "x25519" "hybrid-pq" ];
+        default = "x25519";
+        description = ''
+          Type of age key to generate when generateKey is true.
+          "x25519" generates a classic X25519 key.
+          "hybrid-pq" generates a post-quantum hybrid key using ML-KEM-768 + X25519
+          (requires age >= 1.3.0).
+        '';
+      };
+
       sshKeyPaths = lib.mkOption {
         type = lib.types.listOf lib.types.path;
         default = [ ];
@@ -346,6 +358,10 @@ in
             && cfg.gnupg.qubes-split-gpg.domain != ""
           );
         message = "sops.gnupg.qubes-split-gpg.domain is required when sops.gnupg.qubes-split-gpg.enable is set to true";
+      }
+      {
+        assertion = cfg.age.generateKeyType == "hybrid-pq" -> cfg.age.keyFile != null;
+        message = "sops.age.generateKeyType = \"hybrid-pq\" requires sops.age.keyFile to be set. Post-quantum keys cannot be derived from SSH keys (sops.age.sshKeyPaths).";
       }
     ];
 

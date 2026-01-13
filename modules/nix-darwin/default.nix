@@ -158,6 +158,7 @@ let
   ];
 
   escapedKeyFile = lib.escapeShellArg cfg.age.keyFile;
+  pqFlag = lib.optionalString (cfg.age.generateKeyType == "hybrid-pq") " -pq";
   # Skip ssh keys deployed with sops to avoid a catch 22
   defaultImportKeys =
     algo:
@@ -173,7 +174,7 @@ let
             echo generating machine-specific age key...
             mkdir -p "$(dirname ${escapedKeyFile})"
             # age-keygen sets 0600 by default, no need to chmod.
-            ${pkgs.age}/bin/age-keygen -o ${escapedKeyFile}
+            ${pkgs.age}/bin/age-keygen${pqFlag} -o ${escapedKeyFile}
           fi
         ''
       else
@@ -300,6 +301,17 @@ in
         '';
       };
 
+      generateKeyType = lib.mkOption {
+        type = lib.types.enum [ "x25519" "hybrid-pq" ];
+        default = "x25519";
+        description = ''
+          Type of age key to generate when generateKey is true.
+          "x25519" generates a classic X25519 key.
+          "hybrid-pq" generates a post-quantum hybrid key using ML-KEM-768 + X25519
+          (requires age >= 1.3.0).
+        '';
+      };
+
       sshKeyPaths = lib.mkOption {
         type = lib.types.listOf lib.types.path;
         default = defaultImportKeys "ed25519";
@@ -368,6 +380,10 @@ in
           {
             assertion = !(cfg.gnupg.home != null && cfg.gnupg.sshKeyPaths != [ ]);
             message = "Exactly one of sops.gnupg.home and sops.gnupg.sshKeyPaths must be set";
+          }
+          {
+            assertion = cfg.age.generateKeyType == "hybrid-pq" -> cfg.age.keyFile != null;
+            message = "sops.age.generateKeyType = \"hybrid-pq\" requires sops.age.keyFile to be set. Post-quantum keys cannot be derived from SSH keys (sops.age.sshKeyPaths).";
           }
         ]
         ++ lib.optionals cfg.validateSopsFiles (

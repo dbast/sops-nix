@@ -227,6 +227,73 @@ in
     '';
   };
 
+  age-pq-key-generation = testers.runNixOSTest {
+    name = "sops-age-pq-key-generation";
+    nodes.machine =
+      { pkgs, ... }:
+      {
+        imports = [ ../modules/sops ];
+        environment.systemPackages = [ pkgs.age ];
+        sops = {
+          age.keyFile = "/run/age-keys.txt";
+          defaultSopsFile = testAssets + "/secrets.yaml";
+          secrets.test_key = { };
+        };
+
+        # must run before sops sets up keys
+        boot.initrd.postDeviceCommands = ''
+          cp -r ${testAssets + "/age-keys.txt"} /run/age-keys.txt
+          chmod -R 700 /run/age-keys.txt
+        '';
+      };
+
+    testScript = ''
+      start_all()
+      machine.succeed("cat /run/secrets/test_key | grep -q test_value")
+
+      # Test that post-quantum key generation works (age-keygen -pq)
+      # We just verify the command runs and produces a PQ key format
+      machine.succeed("age-keygen -pq -o /tmp/pq-test-key.txt")
+      machine.succeed("grep -q 'AGE-SECRET-KEY-PQ-' /tmp/pq-test-key.txt")
+      machine.succeed("grep -q 'age1pq' /tmp/pq-test-key.txt")
+    '';
+  };
+
+  # Test that post-quantum key auto-generation works via the module option.
+  # Note: We do NOT test decryption here because sops v3.11.0 uses age v1.2.1
+  # which doesn't support PQ keys. When sops updates to age >= 1.3.0, we can
+  # add decryption tests with PQ-encrypted secrets.
+  age-pq-key-generation-auto = testers.runNixOSTest {
+    name = "sops-age-pq-key-generation-auto";
+    nodes.machine =
+      { pkgs, ... }:
+      {
+        imports = [ ../modules/sops ];
+        environment.systemPackages = [ pkgs.age ];
+
+        # Use generateKey with hybrid-pq type
+        sops.age = {
+          keyFile = "/tmp/pq-testkey";
+          generateKey = true;
+          generateKeyType = "hybrid-pq";
+        };
+      };
+
+    testScript = ''
+      start_all()
+      machine.wait_for_unit("multi-user.target")
+
+      # Verify a post-quantum key was generated with correct format
+      machine.succeed("test -f /tmp/pq-testkey")
+      machine.succeed("grep -q 'AGE-SECRET-KEY-PQ-' /tmp/pq-testkey")
+      machine.succeed("grep -q 'age1pq' /tmp/pq-testkey")
+
+      # Verify the key is valid by using age to encrypt/decrypt with it
+      machine.succeed("echo 'test message' | age -r $(grep 'public key:' /tmp/pq-testkey | cut -d' ' -f4) -o /tmp/encrypted.age")
+      machine.succeed("age -d -i /tmp/pq-testkey /tmp/encrypted.age | grep -q 'test message'")
+    '';
+  };
+
   pgp-keys = testers.runNixOSTest {
     name = "sops-pgp-keys";
     nodes.server =
